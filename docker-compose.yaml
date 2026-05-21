@@ -1,0 +1,153 @@
+# =============================================================================
+# HSHL ADAS Student Lab — Docker Compose
+#
+# AT HOME — replay a bag recorded by the instructor
+# -------------------------------------------------
+#   1. Unzip the instructor's bag folder into  student_adas/bags/
+#   2. docker compose --profile bag up --build
+#   3. Open  http://localhost:8080  to watch the replayed  camera feed
+#
+# IN THE LAB (default — Machine B display + student ADAS)
+# -------------------------------------------------------
+#   1. Create a file called  .env  next to this file containing:
+#        ZENOH_CONNECT_ENDPOINTS=tcp/<MACHINE_A_IP>:7447
+#   2. docker compose up --build
+#   3. Open  http://localhost:8080  on Machine B
+#
+# Single-machine fallback remains supported:
+#   If CARLA and student_adas run on the same machine, set
+#   ZENOH_CONNECT_ENDPOINTS=tcp/host.docker.internal:7447
+#
+# Other useful commands
+# ---------------------
+#   Stop everything          : docker compose [--profile bag] down
+#   Follow ADAS node logs    : docker logs -f adas_student
+#   Follow control output    : docker compose --profile bag logs -f ctrl-logger
+#   Shell into container     : docker exec -it adas_student bash
+#   List ROS topics (inside) : ros2 topic list
+#   Echo a topic (inside)    : ros2 topic echo /carla/hero/speed
+# =============================================================================
+
+# All services share this bridge network so Docker can properly forward
+# container ports to the Windows/Mac host (network_mode: host does not work
+# with Docker Desktop — ports are trapped inside the Linux VM).
+networks:
+  adas_net:
+    driver: bridge
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Zenoh router — only started when using --profile bag (home use).
+  # In the lab, Machine A already runs the shared Zenoh router on port 7447.
+  # Configure ZENOH_CONNECT_ENDPOINTS in a .env file to point Machine B at it.
+  # ---------------------------------------------------------------------------
+  zenoh-router:
+    profiles: [bag]
+    build: .
+    container_name: zenoh_router_student
+    networks: [adas_net]
+    command: bash -c "source /opt/ros/humble/setup.bash && ros2 run rmw_zenoh_cpp rmw_zenohd"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import socket; s=socket.socket(); s.settimeout(1); s.connect(('localhost', 7447)); s.close()\""]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+      start_period: 3s
+
+  # ---------------------------------------------------------------------------
+  # Bag replay — plays a pre-recorded simulation bag on a loop.
+  # Place the bag folder inside  student_adas/bags/  before starting.
+  # Set BAG_NAME=<folder-name> in a .env file to choose a specific bag.
+  # ---------------------------------------------------------------------------
+  bag-replay:
+    profiles: [bag]
+    build: .
+    container_name: bag_replay
+    networks: [adas_net]
+    shm_size: "512m"
+    environment:
+      - RMW_IMPLEMENTATION=rmw_zenoh_cpp
+      - ZENOH_CONNECT_ENDPOINTS=${ZENOH_CONNECT_ENDPOINTS:-tcp/zenoh-router:7447}
+      - ZENOH_ROUTER_CHECK_ATTEMPTS=30
+      - ROS_DOMAIN_ID=0
+      - ROLE_NAME=${ROLE_NAME:-hero}
+      - BAG_NAME=${BAG_NAME:-}
+    volumes:
+      - ./bags:/bags:ro
+    command: bash -c "sleep 3 && bash /app/dev_tools/start_ros_node.sh bash /app/dev_tools/play_bag.sh"
+    depends_on:
+      zenoh-router:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # Control logger — prints your send_control() and HUD calls to the terminal.
+  # Only active with --profile bag. View output:
+  #   docker compose --profile bag logs -f ctrl-logger
+  # ---------------------------------------------------------------------------
+  ctrl-logger:
+    profiles: [bag]
+    build: .
+    container_name: ctrl_logger
+    networks: [adas_net]
+    shm_size: "256m"
+    environment:
+      - RMW_IMPLEMENTATION=rmw_zenoh_cpp
+      - ZENOH_CONNECT_ENDPOINTS=${ZENOH_CONNECT_ENDPOINTS:-tcp/zenoh-router:7447}
+      - ZENOH_ROUTER_CHECK_ATTEMPTS=30
+      - ROS_DOMAIN_ID=0
+      - ROLE_NAME=${ROLE_NAME:-hero}
+      - PYTHONPATH=/app
+    command: >
+      bash -c "sleep 3 && bash /app/dev_tools/start_ros_node.sh python3 dev_tools/control_logger/node.py"
+    depends_on:
+      zenoh-router:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # Your ADAS node — always started, regardless of profile.
+  #
+  # Default (bag / home):
+  #   Connects to the container Zenoh router at tcp/zenoh-router:7447
+  #
+  # Lab / split mode on Machine B:
+  #   Create a .env file next to docker-compose.yaml with:
+  #     ZENOH_CONNECT_ENDPOINTS=tcp/<MACHINE_A_IP>:7447
+  #   This makes the node reach Machine A's native Zenoh router.
+  #
+  # Single-machine fallback:
+  #     ZENOH_CONNECT_ENDPOINTS=tcp/host.docker.internal:7447
+  #   (host.docker.internal is resolved by Docker Desktop on Windows/Mac,
+  #    and by the extra_hosts entry below on native Linux.)
+  # ---------------------------------------------------------------------------
+  adas-student:
+    build: .
+    container_name: adas_student
+    networks: [adas_net]
+    shm_size: "512m"
+    extra_hosts:
+      # Makes host.docker.internal work on native Linux (Docker Desktop
+      # injects it automatically on Windows/Mac).
+      - "host.docker.internal:host-gateway"
+    ports:
+      # Private Machine B display UI — only exposed on localhost by default.
+      # Students on other machines cannot reach this endpoint over LAN.
+      - "${VIEWER_PUBLISH_BIND:-127.0.0.1}:8080:8080"
+    environment:
+      - RMW_IMPLEMENTATION=rmw_zenoh_cpp
+      # Bag / home (default): connects to the zenoh-router container.
+      - ZENOH_CONNECT_ENDPOINTS=${ZENOH_CONNECT_ENDPOINTS:-tcp/zenoh-router:7447}
+      - ZENOH_ROUTER_CHECK_ATTEMPTS=30
+      - ROS_DOMAIN_ID=0
+      - ROLE_NAME=${ROLE_NAME:-hero}
+      - PYTHONPATH=/app
+    depends_on:
+      zenoh-router:
+        condition: service_healthy
+        required: false  # ignored when zenoh-router is not active (lab mode)
+    command: >
+      bash -c "sleep 3 && bash /app/dev_tools/start_ros_node.sh python3 solution/my_adas.py"
+    # Uncomment to mount your code for live editing without rebuilding:
+    # volumes:
+    #   - ./solution:/app/solution

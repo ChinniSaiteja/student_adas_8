@@ -1,0 +1,16 @@
+# =============================================================================
+# Student dependencies
+# =============================================================================
+# Add any extra Python packages you need here (one per line).
+# The image already provides: numpy, opencv, scikit-learn, scipy — do NOT
+# re-add those; duplicates waste build time and can cause version conflicts.
+#
+# Examples:
+#   torch                   # PyTorch (large download — ~2 GB)
+#   torchvision             # Vision utilities for PyTorch
+#   ultralytics             # YOLOv8 object detection
+#   matplotlib              # Plotting / visualisation
+#   pandas                  # Data analysis
+#   filterpy                # Kalman filters
+#   shapely                 # Geometric computations
+# =============================================================================
