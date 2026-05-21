@@ -43,6 +43,7 @@ services:
   # Configure ZENOH_CONNECT_ENDPOINTS in a .env file to point Machine B at it.
   # ---------------------------------------------------------------------------
   zenoh-router:
+    platform: linux/amd64
     profiles: [bag]
     build: .
     container_name: zenoh_router_student
@@ -62,6 +63,7 @@ services:
   # Set BAG_NAME=<folder-name> in a .env file to choose a specific bag.
   # ---------------------------------------------------------------------------
   bag-replay:
+    platform: linux/amd64
     profiles: [bag]
     build: .
     container_name: bag_replay
@@ -87,6 +89,7 @@ services:
   #   docker compose --profile bag logs -f ctrl-logger
   # ---------------------------------------------------------------------------
   ctrl-logger:
+    platform: linux/amd64
     profiles: [bag]
     build: .
     container_name: ctrl_logger
@@ -122,6 +125,7 @@ services:
   #    and by the extra_hosts entry below on native Linux.)
   # ---------------------------------------------------------------------------
   adas-student:
+    platform: linux/amd64
     build: .
     container_name: adas_student
     networks: [adas_net]
